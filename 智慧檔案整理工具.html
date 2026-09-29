@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>智慧檔案整理工具</title>
+<style>
+  *{box-sizing:border-box}
+  body{margin:0;font-family:"Microsoft JhengHei","Noto Sans TC",sans-serif;background:#f4f6f8;color:#1f2937}
+  .wrap{max-width:1100px;margin:36px auto;padding:0 20px}
+  .card{background:white;border-radius:18px;padding:28px;box-shadow:0 10px 30px rgba(0,0,0,.08)}
+  h1{margin:0 0 6px;font-size:30px}
+  .sub{color:#667085;margin-bottom:24px}
+  .toolbar{display:flex;gap:10px;flex-wrap:wrap;margin:16px 0}
+  button{border:0;border-radius:10px;padding:12px 18px;font-size:16px;cursor:pointer}
+  .primary{background:#2563eb;color:white}
+  .success{background:#059669;color:white}
+  .secondary{background:#e5e7eb;color:#111827}
+  button:disabled{opacity:.5;cursor:not-allowed}
+  .option{padding:13px 15px;background:#f8fafc;border:1px solid #e5e7eb;border-radius:10px;margin:12px 0}
+  .status{padding:12px 14px;background:#eff6ff;border-radius:10px;margin:16px 0;color:#1e40af}
+  .tablewrap{overflow:auto;border:1px solid #e5e7eb;border-radius:12px}
+  table{width:100%;border-collapse:collapse;min-width:750px}
+  th,td{text-align:left;padding:12px;border-bottom:1px solid #e5e7eb;font-size:14px}
+  th{background:#f9fafb;position:sticky;top:0}
+  .note{margin-top:18px;color:#667085;font-size:14px;line-height:1.7}
+  .pill{display:inline-block;background:#eef2ff;color:#3730a3;border-radius:999px;padding:3px 9px;font-size:12px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="card">
+    <h1>智慧檔案整理工具</h1>
+    <div class="sub">先預覽、確認後再整理。純工作／個人檔案分類。</div>
+
+    <div class="toolbar">
+      <button class="primary" id="pickBtn">選擇資料夾</button>
+      <button class="secondary" id="previewBtn" disabled>預覽整理結果</button>
+      <button class="success" id="organizeBtn" disabled>開始整理</button>
+      <button class="secondary" id="clearBtn">清除預覽</button>
+    </div>
+
+    <div class="option">
+      <label><input type="checkbox" id="smart" checked> 啟用工作文件智慧分類（依檔名關鍵字）</label>
+    </div>
+
+    <div class="status" id="status">請先選擇要整理的資料夾。</div>
+
+    <div class="tablewrap">
+      <table>
+        <thead><tr><th>原始檔案</th><th>分類</th><th>預計移至</th></tr></thead>
+        <tbody id="rows"><tr><td colspan="3">尚未建立預覽</td></tr></tbody>
+      </table>
+    </div>
+
+    <div class="note">
+      <b>分類：</b>公司工作（財務、公司治理、法務合約、人事）、Word、Excel、PowerPoint、PDF、圖片、影片、音訊、壓縮檔、安裝程式及其他。<br>
+      <span class="pill">安全設計</span> 本工具只處理您主動選擇的資料夾第一層檔案，不會自動掃描整台電腦。瀏覽器必須支援 File System Access API（建議使用最新版 Chrome 或 Edge）。
+    </div>
+  </div>
+</div>
+
+<script>
+let dirHandle = null;
+let plan = [];
+
+const EXT = {
+  "Word文件":[".doc",".docx",".rtf"],
+  "Excel試算表":[".xls",".xlsx",".xlsm",".csv"],
+  "PowerPoint簡報":[".ppt",".pptx"],
+  "PDF文件":[".pdf"],
+  "圖片":[".jpg",".jpeg",".png",".gif",".bmp",".webp",".heic",".tif",".tiff"],
+  "影片":[".mp4",".mov",".avi",".mkv",".wmv",".m4v"],
+  "音訊":[".mp3",".wav",".m4a",".aac",".flac"],
+  "壓縮檔":[".zip",".rar",".7z",".tar",".gz"],
+  "安裝程式":[".exe",".msi"],
+  "文字資料":[".txt",".md"]
+};
+const WORK = {
+  "財務":["財務","報表","損益","資產負債","現金流","預算","結帳","會計","發票","invoice","finance","budget"],
+  "公司治理":["公司治理","治理","股東會","董事會","董事","獨董","內線","governance","board"],
+  "法務合約":["合約","契約","保密","nda","contract","agreement","法務","法律"],
+  "人事":["人事","薪資","員工","招募","履歷","考勤","hr","salary","resume"]
+};
+const docCats = new Set(["Word文件","Excel試算表","PowerPoint簡報","PDF文件","文字資料"]);
+
+function category(name) {
+  const lower = name.toLowerCase();
+  if (document.getElementById("smart").checked) {
+    for (const [cat, words] of Object.entries(WORK)) {
+      if (words.some(w => lower.includes(w.toLowerCase()))) return ["公司工作", cat];
+    }
+  }
+  const dot = lower.lastIndexOf(".");
+  const ext = dot >= 0 ? lower.slice(dot) : "";
+  for (const [cat, exts] of Object.entries(EXT)) {
+    if (exts.includes(ext)) return docCats.has(cat) ? ["文件",cat] : [cat];
+  }
+  return ["其他"];
+}
+
+function setStatus(s){document.getElementById("status").textContent=s}
+
+async function pickFolder(){
+  if (!window.showDirectoryPicker) {
+    alert("此瀏覽器不支援資料夾整理功能。請使用最新版 Chrome 或 Edge 開啟此 HTML。");
+    return;
+  }
+  try{
+    dirHandle = await window.showDirectoryPicker({mode:"readwrite"});
+    setStatus("已選擇資料夾："+dirHandle.name);
+    document.getElementById("previewBtn").disabled=false;
+    await preview();
+  }catch(e){
+    if(e.name!=="AbortError") alert("無法選擇資料夾："+e.message);
+  }
+}
+
+async function preview(){
+  if(!dirHandle)return;
+  plan=[];
+  for await (const [name, handle] of dirHandle.entries()){
+    if(handle.kind!=="file") continue;
+    const cats=category(name);
+    plan.push({name,handle,cats});
+  }
+  const rows=document.getElementById("rows");
+  rows.innerHTML="";
+  if(!plan.length){
+    rows.innerHTML='<tr><td colspan="3">沒有需要整理的檔案</td></tr>';
+    document.getElementById("organizeBtn").disabled=true;
+  }else{
+    for(const p of plan){
+      const tr=document.createElement("tr");
+      const path=p.cats.join(" / ");
+      for(const text of [p.name,path,path+" / "+p.name]){
+        const td=document.createElement("td"); td.textContent=text; tr.appendChild(td);
+      }
+      rows.appendChild(tr);
+    }
+    document.getElementById("organizeBtn").disabled=false;
+  }
+  setStatus("預覽完成：共 "+plan.length+" 個檔案準備整理。");
+}
+
+async function getDir(base, parts){
+  let cur=base;
+  for(const p of parts) cur=await cur.getDirectoryHandle(p,{create:true});
+  return cur;
+}
+
+async function uniqueName(dir, name){
+  const dot=name.lastIndexOf(".");
+  const stem=dot>0?name.slice(0,dot):name;
+  const ext=dot>0?name.slice(dot):"";
+  let candidate=name, i=1;
+  while(true){
+    try{
+      await dir.getFileHandle(candidate);
+      candidate=`${stem} (${i++})${ext}`;
+    }catch(e){
+      if(e.name==="NotFoundError") return candidate;
+      throw e;
+    }
+  }
+}
+
+async function organize(){
+  if(!dirHandle || !plan.length)return;
+  if(!confirm(`確定要整理 ${plan.length} 個檔案嗎？\n\n瀏覽器版會先複製到分類資料夾，再刪除原檔。`))return;
+  let done=0, failed=0;
+  for(const p of [...plan]){
+    try{
+      const file=await p.handle.getFile();
+      const targetDir=await getDir(dirHandle,p.cats);
+      const targetName=await uniqueName(targetDir,p.name);
+      const newHandle=await targetDir.getFileHandle(targetName,{create:true});
+      const writable=await newHandle.createWritable();
+      await writable.write(await file.arrayBuffer());
+      await writable.close();
+      await dirHandle.removeEntry(p.name);
+      done++;
+    }catch(e){
+      failed++;
+    }
+  }
+  await preview();
+  alert(`整理完成：${done} 個檔案。`+(failed?`\n${failed} 個檔案未能整理。`:""));
+}
+
+function clearPreview(){
+  plan=[];
+  document.getElementById("rows").innerHTML='<tr><td colspan="3">尚未建立預覽</td></tr>';
+  document.getElementById("organizeBtn").disabled=true;
+  setStatus(dirHandle ? "預覽已清除；目前資料夾："+dirHandle.name : "請先選擇要整理的資料夾。");
+}
+
+document.getElementById("pickBtn").onclick=pickFolder;
+document.getElementById("previewBtn").onclick=preview;
+document.getElementById("organizeBtn").onclick=organize;
+document.getElementById("clearBtn").onclick=clearPreview;
+document.getElementById("smart").onchange=()=>{if(dirHandle)preview()};
+</script>
+</body>
+</html>
